@@ -9,6 +9,19 @@ export default function ProtectedLoading() {
         <div className="h-10 w-36 animate-pulse rounded-lg bg-slate-200" />
       </div>
 
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="rounded-xl border border-slate-200 bg-white p-5 space-y-3"
+          >
+            <div className="h-3 w-28 animate-pulse rounded bg-slate-200" />
+            <div className="h-7 w-32 animate-pulse rounded bg-slate-200" />
+            <div className="h-3 w-20 animate-pulse rounded bg-slate-100" />
+          </div>
+        ))}
+      </div>
+
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="divide-y divide-slate-100">
           {Array.from({ length: 5 }).map((_, index) => (

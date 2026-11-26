@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
+import { Pencil, Plus, ReceiptText, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { apiMutate } from '@/lib/api/client';
 import {
   formatCivilDateBR,
@@ -13,7 +13,7 @@ import {
 } from '@/lib/domain/dates';
 import { formatCentsToBRL, formatCentsToInput } from '@/lib/domain/money';
 import { resolveDefaultPersonId } from '@/lib/domain/people';
-import { expenseFormSchema } from '@/lib/domain/schemas';
+import { expenseFormSchema, type ExpenseSortOption } from '@/lib/domain/schemas';
 import { FeedbackBanner, type FeedbackState } from './feedback-banner';
 import { Modal } from './modal';
 
@@ -38,20 +38,81 @@ export interface SelectOptionItem {
   isDefault?: boolean;
 }
 
+export interface ExpenseFilterState {
+  q: string;
+  startDate: string;
+  endDate: string;
+  categoryId: string;
+  personId: string;
+  bankAccountId: string;
+  sort: ExpenseSortOption;
+}
+
 interface ExpensesClientProps {
   initialExpenses: ExpenseRowItem[];
+  initialFilteredTotalCents: number;
+  initialFilters: ExpenseFilterState;
   categories: SelectOptionItem[];
   people: SelectOptionItem[];
   bankAccounts: SelectOptionItem[];
 }
 
+function buildQueryParams(filters: ExpenseFilterState): string {
+  const params = new URLSearchParams();
+  const q = filters.q.trim();
+  if (q) params.set('q', q);
+  if (filters.startDate) params.set('inicio', filters.startDate);
+  if (filters.endDate) params.set('fim', filters.endDate);
+  if (filters.categoryId) params.set('categoria', filters.categoryId);
+  if (filters.personId) params.set('pessoa', filters.personId);
+  if (filters.bankAccountId) params.set('conta', filters.bankAccountId);
+  if (filters.sort && filters.sort !== 'date_desc') {
+    params.set('ordenar', filters.sort);
+  }
+  return params.toString();
+}
+
 export function ExpensesClient({
   initialExpenses,
+  initialFilteredTotalCents,
+  initialFilters,
   categories,
   people,
   bankAccounts,
 }: ExpensesClientProps) {
   const router = useRouter();
+  const [prevInitialExpenses, setPrevInitialExpenses] = useState(initialExpenses);
+  const [expenses, setExpenses] = useState(initialExpenses);
+  const [filteredTotalCents, setFilteredTotalCents] = useState(initialFilteredTotalCents);
+
+  if (prevInitialExpenses !== initialExpenses) {
+    setPrevInitialExpenses(initialExpenses);
+    setExpenses(initialExpenses);
+    setFilteredTotalCents(initialFilteredTotalCents);
+  }
+
+  const [filters, setFilters] = useState<ExpenseFilterState>(initialFilters);
+  const [searchInput, setSearchInput] = useState(initialFilters.q);
+  const [startDateInput, setStartDateInput] = useState(
+    initialFilters.startDate ? formatCivilDateBR(initialFilters.startDate) : ''
+  );
+  const [endDateInput, setEndDateInput] = useState(
+    initialFilters.endDate ? formatCivilDateBR(initialFilters.endDate) : ''
+  );
+  const [filterDateError, setFilterDateError] = useState<string | null>(null);
+  const [loadingList, setLoadingList] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
+
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -70,6 +131,187 @@ export function ExpensesClient({
 
   const missingDependencies = categories.length === 0 || people.length === 0;
   const activeAccounts = bankAccounts.filter((account) => !account.archived);
+
+  const hasActiveFilters = Boolean(
+    filters.q.trim() ||
+      filters.startDate ||
+      filters.endDate ||
+      filters.categoryId ||
+      filters.personId ||
+      filters.bankAccountId ||
+      filters.sort !== 'date_desc' ||
+      searchInput.trim() ||
+      startDateInput ||
+      endDateInput
+  );
+
+  async function executeFetch(nextFilters: ExpenseFilterState, syncUrl = true) {
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const query = buildQueryParams(nextFilters);
+    if (syncUrl && typeof window !== 'undefined') {
+      const nextUrl = query ? `/despesas?${query}` : '/despesas';
+      window.history.replaceState(null, '', nextUrl);
+    }
+
+    setLoadingList(true);
+    setListError(null);
+
+    try {
+      const response = await fetch(`/api/expenses${query ? `?${query}` : ''}`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+
+      if (response.status === 401) {
+        router.replace('/login');
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        data?: { items: ExpenseRowItem[]; filteredTotalCents: number };
+      };
+
+      if (!response.ok || !payload.ok || !payload.data) {
+        setListError(payload.error ?? 'Não foi possível filtrar as despesas.');
+        setLoadingList(false);
+        return;
+      }
+
+      setExpenses(payload.data.items);
+      setFilteredTotalCents(payload.data.filteredTotalCents);
+      setLoadingList(false);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      setListError('Erro de conexão ao consultar despesas.');
+      setLoadingList(false);
+    }
+  }
+
+  function applyImmediateFilter(nextFilters: ExpenseFilterState) {
+    setFilters(nextFilters);
+    void executeFetch(nextFilters);
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchInput(value);
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      const nextFilters: ExpenseFilterState = {
+        ...filters,
+        q: value.trim(),
+      };
+      setFilters(nextFilters);
+      void executeFetch(nextFilters);
+    }, 280);
+  }
+
+  function handleStartDateChange(raw: string) {
+    const masked = maskCivilDateBRInput(raw);
+    setStartDateInput(masked);
+
+    if (masked.length === 0) {
+      setFilterDateError(null);
+      if (filters.startDate !== '') {
+        applyImmediateFilter({ ...filters, startDate: '' });
+      }
+      return;
+    }
+
+    if (masked.length < 10) {
+      setFilterDateError(null);
+      return;
+    }
+
+    const iso = parseCivilDateBRToISO(masked);
+    if (!iso) {
+      setFilterDateError('Data inicial inválida. Use o formato DD/MM/AAAA.');
+      return;
+    }
+
+    if (filters.endDate && iso > filters.endDate) {
+      setFilterDateError('A data inicial não pode ser posterior à data final.');
+      return;
+    }
+
+    setFilterDateError(null);
+    applyImmediateFilter({ ...filters, startDate: iso });
+  }
+
+  function handleEndDateChange(raw: string) {
+    const masked = maskCivilDateBRInput(raw);
+    setEndDateInput(masked);
+
+    if (masked.length === 0) {
+      setFilterDateError(null);
+      if (filters.endDate !== '') {
+        applyImmediateFilter({ ...filters, endDate: '' });
+      }
+      return;
+    }
+
+    if (masked.length < 10) {
+      setFilterDateError(null);
+      return;
+    }
+
+    const iso = parseCivilDateBRToISO(masked);
+    if (!iso) {
+      setFilterDateError('Data final inválida. Use o formato DD/MM/AAAA.');
+      return;
+    }
+
+    if (filters.startDate && iso < filters.startDate) {
+      setFilterDateError('A data final não pode ser anterior à data inicial.');
+      return;
+    }
+
+    setFilterDateError(null);
+    applyImmediateFilter({ ...filters, endDate: iso });
+  }
+
+  function handleDateFilterBlur(field: 'start' | 'end') {
+    const currentValue = field === 'start' ? startDateInput : endDateInput;
+    if (currentValue.length > 0 && currentValue.length < 10) {
+      setFilterDateError(
+        field === 'start'
+          ? 'Data inicial incompleta. Informe DD/MM/AAAA ou limpe o campo.'
+          : 'Data final incompleta. Informe DD/MM/AAAA ou limpe o campo.'
+      );
+    }
+  }
+
+  function handleClearFilters() {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    setSearchInput('');
+    setStartDateInput('');
+    setEndDateInput('');
+    setFilterDateError(null);
+    setListError(null);
+    applyImmediateFilter({
+      q: '',
+      startDate: '',
+      endDate: '',
+      categoryId: '',
+      personId: '',
+      bankAccountId: '',
+      sort: 'date_desc',
+    });
+  }
 
   function openCreate() {
     setEditing(null);
@@ -151,6 +393,7 @@ export function ExpensesClient({
         ? 'Despesa atualizada com sucesso.'
         : 'Despesa registrada com sucesso.',
     });
+    await executeFetch(filters, false);
     router.refresh();
   }
 
@@ -172,6 +415,7 @@ export function ExpensesClient({
 
     setDeleting(null);
     setFeedback({ type: 'success', message: 'Despesa excluída com sucesso.' });
+    await executeFetch(filters, false);
     router.refresh();
   }
 
@@ -187,8 +431,7 @@ export function ExpensesClient({
             Despesas
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            Registro centralizado de gastos em reais (BRL) com categoria e responsável
-            obrigatórios.
+            Consulte, filtre e registre os gastos da casa em reais (BRL).
           </p>
         </div>
 
@@ -233,31 +476,275 @@ export function ExpensesClient({
         </div>
       ) : null}
 
-      {initialExpenses.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
-          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700">
-            <ReceiptText className="h-5 w-5" />
+      <section
+        aria-label="Pesquisa e filtros de despesas"
+        className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+      >
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search
+                className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden="true"
+              />
+              <input
+                id="expense-search"
+                type="search"
+                value={searchInput}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="Pesquisar despesas pela descrição..."
+                aria-label="Pesquisar despesas pela descrição"
+                maxLength={100}
+                className="block min-h-[42px] w-full rounded-lg border border-slate-300 bg-white py-2 pr-10 pl-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none"
+              />
+              {searchInput ? (
+                <button
+                  type="button"
+                  onClick={() => handleSearchChange('')}
+                  aria-label="Limpar pesquisa"
+                  className="absolute top-1/2 right-2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 sm:w-56">
+              <label htmlFor="filter-sort" className="sr-only">
+                Ordenação
+              </label>
+              <select
+                id="filter-sort"
+                value={filters.sort}
+                onChange={(e) =>
+                  applyImmediateFilter({
+                    ...filters,
+                    sort: e.target.value as ExpenseSortOption,
+                  })
+                }
+                aria-label="Ordenar despesas"
+                className="block min-h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
+              >
+                <option value="date_desc">Mais recentes primeiro</option>
+                <option value="date_asc">Mais antigas primeiro</option>
+                <option value="amount_desc">Maior valor</option>
+                <option value="amount_asc">Menor valor</option>
+              </select>
+            </div>
           </div>
-          <h2 className="mt-4 text-base font-semibold text-slate-900">
-            Nenhuma despesa registrada ainda
-          </h2>
-          <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
-            Quando você registrar despesas, elas aparecerão aqui ordenadas pela data
-            civil selecionada.
-          </p>
-          {!missingDependencies ? (
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div>
+              <label
+                htmlFor="filter-start-date"
+                className="block text-xs font-medium text-slate-600"
+              >
+                Data inicial
+              </label>
+              <input
+                id="filter-start-date"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={10}
+                value={startDateInput}
+                onChange={(e) => handleStartDateChange(e.target.value)}
+                onBlur={() => handleDateFilterBlur('start')}
+                placeholder="DD/MM/AAAA"
+                className="mt-1 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="filter-end-date"
+                className="block text-xs font-medium text-slate-600"
+              >
+                Data final
+              </label>
+              <input
+                id="filter-end-date"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={10}
+                value={endDateInput}
+                onChange={(e) => handleEndDateChange(e.target.value)}
+                onBlur={() => handleDateFilterBlur('end')}
+                placeholder="DD/MM/AAAA"
+                className="mt-1 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="filter-category"
+                className="block text-xs font-medium text-slate-600"
+              >
+                Categoria
+              </label>
+              <select
+                id="filter-category"
+                value={filters.categoryId}
+                onChange={(e) =>
+                  applyImmediateFilter({ ...filters, categoryId: e.target.value })
+                }
+                className="mt-1 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
+              >
+                <option value="">Todas as categorias</option>
+                {categories.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="filter-person"
+                className="block text-xs font-medium text-slate-600"
+              >
+                Responsável
+              </label>
+              <select
+                id="filter-person"
+                value={filters.personId}
+                onChange={(e) =>
+                  applyImmediateFilter({ ...filters, personId: e.target.value })
+                }
+                className="mt-1 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
+              >
+                <option value="">Todos os responsáveis</option>
+                {people.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="filter-account"
+                className="block text-xs font-medium text-slate-600"
+              >
+                Conta bancária
+              </label>
+              <select
+                id="filter-account"
+                value={filters.bankAccountId}
+                onChange={(e) =>
+                  applyImmediateFilter({ ...filters, bankAccountId: e.target.value })
+                }
+                className="mt-1 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
+              >
+                <option value="">Todas as contas</option>
+                {bankAccounts.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                    {item.archived ? ' (arquivada)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {filterDateError ? (
+            <p role="alert" className="text-xs font-medium text-red-700">
+              {filterDateError}
+            </p>
+          ) : null}
+
+          {listError ? (
+            <p role="alert" className="text-xs font-medium text-red-700">
+              {listError}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+              <span className="text-slate-600">
+                {hasActiveFilters
+                  ? 'Total dos resultados filtrados:'
+                  : 'Total das despesas listadas:'}
+              </span>
+              <span className="font-mono text-base font-semibold text-slate-900 tabular-nums">
+                {formatCentsToBRL(filteredTotalCents)}
+              </span>
+              <span className="text-xs text-slate-500 tabular-nums">
+                · {expenses.length}{' '}
+                {expenses.length === 1 ? 'lançamento' : 'lançamentos'}
+                {loadingList ? ' · Atualizando...' : ''}
+              </span>
+            </div>
+
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Limpar filtros</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      {expenses.length === 0 ? (
+        hasActiveFilters ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
+            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700">
+              <Search className="h-5 w-5" />
+            </div>
+            <h2 className="mt-4 text-base font-semibold text-slate-900">
+              Nenhuma despesa encontrada para os filtros selecionados
+            </h2>
+            <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+              Tente ajustar o texto da pesquisa, ampliar o período ou limpar os filtros
+              para visualizar todos os lançamentos.
+            </p>
             <button
               type="button"
-              onClick={openCreate}
-              className="mt-5 inline-flex min-h-[42px] items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800"
+              onClick={handleClearFilters}
+              className="mt-5 inline-flex min-h-[42px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition-colors hover:bg-slate-50"
             >
-              <Plus className="h-4 w-4" />
-              <span>Registrar primeira despesa</span>
+              <RotateCcw className="h-4 w-4" />
+              <span>Limpar filtros</span>
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
+            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700">
+              <ReceiptText className="h-5 w-5" />
+            </div>
+            <h2 className="mt-4 text-base font-semibold text-slate-900">
+              Nenhuma despesa registrada ainda
+            </h2>
+            <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+              Quando você registrar despesas, elas aparecerão aqui ordenadas pela data
+              civil selecionada.
+            </p>
+            {!missingDependencies ? (
+              <button
+                type="button"
+                onClick={openCreate}
+                className="mt-5 inline-flex min-h-[42px] items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Registrar primeira despesa</span>
+              </button>
+            ) : null}
+          </div>
+        )
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div
+          className={`overflow-hidden rounded-xl border border-slate-200 bg-white transition-opacity ${
+            loadingList ? 'opacity-70' : 'opacity-100'
+          }`}
+        >
           <div className="hidden md:block">
             <table className="w-full border-collapse text-left text-sm">
               <thead>
@@ -272,7 +759,7 @@ export function ExpensesClient({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {initialExpenses.map((expense) => (
+                {expenses.map((expense) => (
                   <tr key={expense.id} className="transition-colors hover:bg-slate-50/70">
                     <td className="px-5 py-3.5 font-mono text-xs text-slate-600 tabular-nums whitespace-nowrap">
                       {formatCivilDateBR(expense.date)}
@@ -322,7 +809,7 @@ export function ExpensesClient({
           </div>
 
           <ul className="divide-y divide-slate-100 md:hidden">
-            {initialExpenses.map((expense) => (
+            {expenses.map((expense) => (
               <li key={expense.id} className="space-y-3 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

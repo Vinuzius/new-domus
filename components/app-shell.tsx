@@ -6,7 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, Menu, X } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Despesas' },
+  { href: '/', label: 'Resumo' },
+  { href: '/despesas', label: 'Despesas' },
   { href: '/categorias', label: 'Categorias' },
   { href: '/pessoas', label: 'Pessoas' },
   { href: '/contas', label: 'Contas' },

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isValidCivilDate } from './dates';
+import { isValidCivilDate, isValidYearMonth } from './dates';
 import { parseBRLInputToCents } from './money';
 
 const uuidRegex =
@@ -174,7 +174,85 @@ export const expenseInputSchema = z.object({
     .transform((val) => val ?? null),
 });
 
+export const yearMonthSchema = z
+  .string()
+  .trim()
+  .refine(isValidYearMonth, 'Competência mensal inválida (AAAA-MM).');
+
+export const EXPENSE_SORT_VALUES = [
+  'date_desc',
+  'date_asc',
+  'amount_desc',
+  'amount_asc',
+] as const;
+
+export type ExpenseSortOption = (typeof EXPENSE_SORT_VALUES)[number];
+
+export const expenseFilterSchema = z
+  .object({
+    q: z
+      .string()
+      .trim()
+      .max(100, 'A pesquisa pode ter no máximo 100 caracteres.')
+      .optional()
+      .transform((val) => (val && val.length > 0 ? val : undefined)),
+    startDate: z
+      .string()
+      .trim()
+      .optional()
+      .transform((val) => (val && val.length > 0 ? val : undefined))
+      .refine(
+        (val) => val === undefined || isValidCivilDate(val),
+        'Data inicial inválida (AAAA-MM-DD).'
+      ),
+    endDate: z
+      .string()
+      .trim()
+      .optional()
+      .transform((val) => (val && val.length > 0 ? val : undefined))
+      .refine(
+        (val) => val === undefined || isValidCivilDate(val),
+        'Data final inválida (AAAA-MM-DD).'
+      ),
+    categoryId: z
+      .string()
+      .trim()
+      .optional()
+      .transform((val) => (val && val.length > 0 ? val : undefined))
+      .refine(
+        (val) => val === undefined || uuidRegex.test(val),
+        'Filtro de categoria inválido.'
+      ),
+    personId: z
+      .string()
+      .trim()
+      .optional()
+      .transform((val) => (val && val.length > 0 ? val : undefined))
+      .refine(
+        (val) => val === undefined || uuidRegex.test(val),
+        'Filtro de responsável inválido.'
+      ),
+    bankAccountId: z
+      .string()
+      .trim()
+      .optional()
+      .transform((val) => (val && val.length > 0 ? val : undefined))
+      .refine(
+        (val) => val === undefined || uuidRegex.test(val),
+        'Filtro de conta bancária inválido.'
+      ),
+    sort: z.enum(EXPENSE_SORT_VALUES).optional().default('date_desc'),
+  })
+  .refine(
+    (data) => !data.startDate || !data.endDate || data.startDate <= data.endDate,
+    {
+      message: 'A data inicial não pode ser posterior à data final.',
+      path: ['startDate'],
+    }
+  );
+
 export type CategoryInput = z.infer<typeof categorySchema>;
 export type PersonInput = z.infer<typeof personSchema>;
 export type BankAccountInput = z.infer<typeof bankAccountInputSchema>;
 export type ExpenseInput = z.infer<typeof expenseInputSchema>;
+export type ExpenseFilterInput = z.infer<typeof expenseFilterSchema>;

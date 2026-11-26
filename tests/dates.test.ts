@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatCivilDateBR,
+  formatYearMonthLabelPTBR,
+  getMonthDateRange,
   isValidCivilDate,
   isValidCivilDateBR,
+  isValidYearMonth,
   maskCivilDateBRInput,
   parseCivilDateBRToISO,
+  shiftYearMonth,
 } from '@/lib/domain/dates';
 
 describe('Validação, máscara e conversão de datas civis (DD/MM/AAAA e YYYY-MM-DD)', () => {
@@ -64,5 +68,29 @@ describe('Validação, máscara e conversão de datas civis (DD/MM/AAAA e YYYY-M
     expect(maskCivilDateBRInput('2611')).toBe('26/11');
     expect(maskCivilDateBRInput('26112026')).toBe('26/11/2026');
     expect(maskCivilDateBRInput('26/11/202699abc')).toBe('26/11/2026');
+  });
+
+  it('calcula intervalo mensal, navegação entre meses e rótulo pt-BR sem conversão UTC', () => {
+    expect(isValidYearMonth('2026-11')).toBe(true);
+    expect(isValidYearMonth('2026-13')).toBe(false);
+    expect(isValidYearMonth('2026-00')).toBe(false);
+
+    expect(getMonthDateRange('2026-11')).toEqual({
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+    });
+    expect(getMonthDateRange('2024-02')).toEqual({
+      startDate: '2024-02-01',
+      endDate: '2024-02-29',
+    });
+    expect(getMonthDateRange('2026-02')).toEqual({
+      startDate: '2026-02-01',
+      endDate: '2026-02-28',
+    });
+
+    expect(shiftYearMonth('2026-01', -1)).toBe('2025-12');
+    expect(shiftYearMonth('2026-12', 1)).toBe('2027-01');
+    expect(formatYearMonthLabelPTBR('2026-11')).toBe('Novembro de 2026');
+    expect(formatYearMonthLabelPTBR('2026-03')).toBe('Março de 2026');
   });
 });

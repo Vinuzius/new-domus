@@ -1,7 +1,15 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, ilike, lte, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { bankAccounts, categories, expenses, people } from '@/db/schema';
-import { expenseInputSchema, idSchema, type ExpenseInput } from '@/lib/domain/schemas';
+import { getMonthDateRange } from '@/lib/domain/dates';
+import {
+  expenseFilterSchema,
+  expenseInputSchema,
+  idSchema,
+  yearMonthSchema,
+  type ExpenseInput,
+  type ExpenseSortOption,
+} from '@/lib/domain/schemas';
 import { ServiceError, translateDbError } from './errors';
 
 export interface ExpenseListItem {
@@ -20,8 +28,113 @@ export interface ExpenseListItem {
   updatedAt: Date;
 }
 
+export interface ExpenseFilteredResult {
+  items: ExpenseListItem[];
+  filteredTotalCents: number;
+  filteredCount: number;
+}
+
+export interface MonthlyCategoryBreakdownItem {
+  categoryId: string;
+  categoryName: string;
+  totalCents: number;
+  expenseCount: number;
+  percentage: number;
+}
+
+export interface MonthlyLargestExpense {
+  id: string;
+  description: string;
+  amountCents: number;
+  date: string;
+  categoryName: string;
+  personName: string;
+}
+
+export interface MonthlySummaryRawData {
+  totalCents: number;
+  expenseCount: number;
+  largestExpense: MonthlyLargestExpense | null;
+  byCategory: Array<{
+    categoryId: string;
+    categoryName: string;
+    totalCents: number;
+    expenseCount: number;
+  }>;
+  recentExpenses: ExpenseListItem[];
+}
+
+export interface MonthlySummaryResult {
+  yearMonth: string;
+  startDate: string;
+  endDate: string;
+  totalCents: number;
+  expenseCount: number;
+  averageCents: number;
+  largestExpense: MonthlyLargestExpense | null;
+  byCategory: MonthlyCategoryBreakdownItem[];
+  recentExpenses: ExpenseListItem[];
+}
+
+export function buildMonthlySummary(
+  yearMonth: string,
+  startDate: string,
+  endDate: string,
+  raw: MonthlySummaryRawData
+): MonthlySummaryResult {
+  const totalCents = Math.max(0, Math.trunc(raw.totalCents));
+  const expenseCount = Math.max(0, Math.trunc(raw.expenseCount));
+  const averageCents = expenseCount > 0 ? Math.round(totalCents / expenseCount) : 0;
+
+  const byCategory = raw.byCategory
+    .filter((item) => item.expenseCount > 0 && item.totalCents > 0)
+    .sort(
+      (a, b) =>
+        b.totalCents - a.totalCents ||
+        a.categoryName.localeCompare(b.categoryName, 'pt-BR')
+    )
+    .map((item) => ({
+      categoryId: item.categoryId,
+      categoryName: item.categoryName,
+      totalCents: Math.trunc(item.totalCents),
+      expenseCount: Math.trunc(item.expenseCount),
+      percentage:
+        totalCents > 0
+          ? Math.round((item.totalCents / totalCents) * 1000) / 10
+          : 0,
+    }));
+
+  return {
+    yearMonth,
+    startDate,
+    endDate,
+    totalCents,
+    expenseCount,
+    averageCents,
+    largestExpense: raw.largestExpense,
+    byCategory,
+    recentExpenses: raw.recentExpenses,
+  };
+}
+
+export interface NormalizedExpenseFilters {
+  q?: string;
+  startDate?: string;
+  endDate?: string;
+  categoryId?: string;
+  personId?: string;
+  bankAccountId?: string;
+  sort: ExpenseSortOption;
+}
+
 export interface ExpenseRepository {
   listAll(): Promise<ExpenseListItem[]>;
+  listFiltered(filters: NormalizedExpenseFilters): Promise<ExpenseListItem[]>;
+  getMonthlySummaryRaw(
+    startDate: string,
+    endDate: string,
+    recentLimit: number
+  ): Promise<MonthlySummaryRawData>;
   findById(id: string): Promise<{ id: string; bankAccountId: string | null } | null>;
   categoryExists(id: string): Promise<boolean>;
   personExists(id: string): Promise<boolean>;
@@ -31,10 +144,53 @@ export interface ExpenseRepository {
   deleteById(id: string): Promise<boolean>;
 }
 
+function escapeIlikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+function getOrderByColumns(sort: ExpenseSortOption) {
+  switch (sort) {
+    case 'date_asc':
+      return [asc(expenses.date), asc(expenses.createdAt)];
+    case 'amount_desc':
+      return [desc(expenses.amountCents), desc(expenses.date), desc(expenses.createdAt)];
+    case 'amount_asc':
+      return [asc(expenses.amountCents), desc(expenses.date), desc(expenses.createdAt)];
+    case 'date_desc':
+    default:
+      return [desc(expenses.date), desc(expenses.createdAt)];
+  }
+}
+
 const drizzleExpenseRepo: ExpenseRepository = {
   async listAll() {
+    return this.listFiltered({ sort: 'date_desc' });
+  },
+
+  async listFiltered(filters) {
     const db = getDb();
-    const rows = await db
+    const conditions: SQL[] = [];
+
+    if (filters.q) {
+      conditions.push(ilike(expenses.description, `%${escapeIlikePattern(filters.q)}%`));
+    }
+    if (filters.startDate) {
+      conditions.push(gte(expenses.date, filters.startDate));
+    }
+    if (filters.endDate) {
+      conditions.push(lte(expenses.date, filters.endDate));
+    }
+    if (filters.categoryId) {
+      conditions.push(eq(expenses.categoryId, filters.categoryId));
+    }
+    if (filters.personId) {
+      conditions.push(eq(expenses.personId, filters.personId));
+    }
+    if (filters.bankAccountId) {
+      conditions.push(eq(expenses.bankAccountId, filters.bankAccountId));
+    }
+
+    const baseQuery = db
       .select({
         id: expenses.id,
         description: expenses.description,
@@ -53,14 +209,109 @@ const drizzleExpenseRepo: ExpenseRepository = {
       .from(expenses)
       .innerJoin(categories, eq(expenses.categoryId, categories.id))
       .innerJoin(people, eq(expenses.personId, people.id))
-      .leftJoin(bankAccounts, eq(expenses.bankAccountId, bankAccounts.id))
-      .orderBy(desc(expenses.date), desc(expenses.createdAt));
+      .leftJoin(bankAccounts, eq(expenses.bankAccountId, bankAccounts.id));
+
+    const rows = await (
+      conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery
+    ).orderBy(...getOrderByColumns(filters.sort));
 
     return rows.map((row) => ({
       ...row,
       bankAccountName: row.bankAccountName ?? null,
       bankAccountArchived: Boolean(row.bankAccountArchived),
     }));
+  },
+
+  async getMonthlySummaryRaw(startDate, endDate, recentLimit) {
+    const db = getDb();
+    const periodCondition = and(
+      gte(expenses.date, startDate),
+      lte(expenses.date, endDate)
+    );
+
+    const [totalsRows, largestRows, categoryRows, recentRows] = await Promise.all([
+      db
+        .select({
+          totalCents: sql<number>`coalesce(sum(${expenses.amountCents}), 0)::bigint`,
+          expenseCount: count(expenses.id),
+        })
+        .from(expenses)
+        .where(periodCondition),
+
+      db
+        .select({
+          id: expenses.id,
+          description: expenses.description,
+          amountCents: expenses.amountCents,
+          date: expenses.date,
+          categoryName: categories.name,
+          personName: people.name,
+        })
+        .from(expenses)
+        .innerJoin(categories, eq(expenses.categoryId, categories.id))
+        .innerJoin(people, eq(expenses.personId, people.id))
+        .where(periodCondition)
+        .orderBy(desc(expenses.amountCents), desc(expenses.date), desc(expenses.createdAt))
+        .limit(1),
+
+      db
+        .select({
+          categoryId: categories.id,
+          categoryName: categories.name,
+          totalCents: sql<number>`coalesce(sum(${expenses.amountCents}), 0)::bigint`,
+          expenseCount: count(expenses.id),
+        })
+        .from(expenses)
+        .innerJoin(categories, eq(expenses.categoryId, categories.id))
+        .where(periodCondition)
+        .groupBy(categories.id, categories.name)
+        .orderBy(
+          desc(sql`coalesce(sum(${expenses.amountCents}), 0)`),
+          asc(categories.name)
+        ),
+
+      db
+        .select({
+          id: expenses.id,
+          description: expenses.description,
+          amountCents: expenses.amountCents,
+          date: expenses.date,
+          categoryId: expenses.categoryId,
+          categoryName: categories.name,
+          personId: expenses.personId,
+          personName: people.name,
+          bankAccountId: expenses.bankAccountId,
+          bankAccountName: bankAccounts.name,
+          bankAccountArchived: bankAccounts.archived,
+          createdAt: expenses.createdAt,
+          updatedAt: expenses.updatedAt,
+        })
+        .from(expenses)
+        .innerJoin(categories, eq(expenses.categoryId, categories.id))
+        .innerJoin(people, eq(expenses.personId, people.id))
+        .leftJoin(bankAccounts, eq(expenses.bankAccountId, bankAccounts.id))
+        .where(periodCondition)
+        .orderBy(desc(expenses.date), desc(expenses.createdAt))
+        .limit(recentLimit),
+    ]);
+
+    const totals = totalsRows[0];
+    return {
+      totalCents: Number(totals?.totalCents ?? 0),
+      expenseCount: Number(totals?.expenseCount ?? 0),
+      largestExpense: largestRows[0] ?? null,
+      byCategory: categoryRows.map((row) => ({
+        categoryId: row.categoryId,
+        categoryName: row.categoryName,
+        totalCents: Number(row.totalCents ?? 0),
+        expenseCount: Number(row.expenseCount ?? 0),
+      })),
+      recentExpenses: recentRows.map((row) => ({
+        ...row,
+        bankAccountName: row.bankAccountName ?? null,
+        bankAccountArchived: Boolean(row.bankAccountArchived),
+      })),
+    };
   },
 
   async findById(id) {
@@ -203,6 +454,58 @@ export function createExpenseService(repo: ExpenseRepository = drizzleExpenseRep
       } catch (error) {
         console.error('Erro ao listar despesas:', error);
         throw translateDbError(error, 'Não foi possível carregar as despesas.');
+      }
+    },
+
+    async listFiltered(rawFilters: unknown): Promise<ExpenseFilteredResult> {
+      const parsed = expenseFilterSchema.safeParse(rawFilters ?? {});
+      if (!parsed.success) {
+        throw new ServiceError(
+          'VALIDATION',
+          parsed.error.issues[0]?.message ?? 'Parâmetros de filtro inválidos.',
+          400
+        );
+      }
+
+      try {
+        const items = await repo.listFiltered(parsed.data);
+        const filteredTotalCents = items.reduce(
+          (acc, item) => acc + Math.trunc(item.amountCents),
+          0
+        );
+        return {
+          items,
+          filteredTotalCents,
+          filteredCount: items.length,
+        };
+      } catch (error) {
+        console.error('Erro ao filtrar despesas:', error);
+        throw translateDbError(error, 'Não foi possível consultar as despesas.');
+      }
+    },
+
+    async getMonthlySummary(
+      yearMonthRaw: string,
+      recentLimit = 6
+    ): Promise<MonthlySummaryResult> {
+      const parsed = yearMonthSchema.safeParse(yearMonthRaw);
+      if (!parsed.success) {
+        throw new ServiceError(
+          'VALIDATION',
+          parsed.error.issues[0]?.message ?? 'Competência mensal inválida.',
+          400
+        );
+      }
+
+      const safeLimit = Math.max(1, Math.min(20, Math.trunc(recentLimit)));
+      const { startDate, endDate } = getMonthDateRange(parsed.data);
+
+      try {
+        const raw = await repo.getMonthlySummaryRaw(startDate, endDate, safeLimit);
+        return buildMonthlySummary(parsed.data, startDate, endDate, raw);
+      } catch (error) {
+        console.error('Erro ao calcular resumo mensal:', error);
+        throw translateDbError(error, 'Não foi possível carregar o resumo mensal.');
       }
     },
 

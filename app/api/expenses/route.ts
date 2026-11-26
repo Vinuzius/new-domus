@@ -1,7 +1,30 @@
 import { NextResponse } from 'next/server';
-import { apiErrorResponse, guardMutationApi } from '@/lib/api/http';
+import { apiErrorResponse, guardMutationApi, guardReadApi } from '@/lib/api/http';
 import { expenseFormSchema } from '@/lib/domain/schemas';
 import { expenseService } from '@/lib/services/expenses';
+
+export async function GET(req: Request) {
+  const denied = await guardReadApi();
+  if (denied) return denied;
+
+  const { searchParams } = new URL(req.url);
+  const rawFilters = {
+    q: searchParams.get('q') ?? undefined,
+    startDate: searchParams.get('inicio') ?? undefined,
+    endDate: searchParams.get('fim') ?? undefined,
+    categoryId: searchParams.get('categoria') ?? undefined,
+    personId: searchParams.get('pessoa') ?? undefined,
+    bankAccountId: searchParams.get('conta') ?? undefined,
+    sort: searchParams.get('ordenar') ?? undefined,
+  };
+
+  try {
+    const result = await expenseService.listFiltered(rawFilters);
+    return NextResponse.json({ ok: true, data: result });
+  } catch (error) {
+    return apiErrorResponse(error, 'Não foi possível consultar as despesas.');
+  }
+}
 
 export async function POST(req: Request) {
   const denied = await guardMutationApi(req);

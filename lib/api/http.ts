@@ -2,14 +2,7 @@ import { NextResponse } from 'next/server';
 import { assertSameOriginRequest, requireActionAuth, UnauthorizedError } from '@/lib/auth/guard';
 import { ServiceError } from '@/lib/services/errors';
 
-export async function guardMutationApi(req: Request): Promise<NextResponse | null> {
-  if (!assertSameOriginRequest(req)) {
-    return NextResponse.json(
-      { ok: false, error: 'Origem da requisição não autorizada.' },
-      { status: 403 }
-    );
-  }
-
+export async function guardReadApi(): Promise<NextResponse | null> {
   try {
     await requireActionAuth();
     return null;
@@ -22,6 +15,17 @@ export async function guardMutationApi(req: Request): Promise<NextResponse | nul
       { status: 401 }
     );
   }
+}
+
+export async function guardMutationApi(req: Request): Promise<NextResponse | null> {
+  if (!assertSameOriginRequest(req)) {
+    return NextResponse.json(
+      { ok: false, error: 'Origem da requisição não autorizada.' },
+      { status: 403 }
+    );
+  }
+
+  return guardReadApi();
 }
 
 export function apiErrorResponse(error: unknown, fallbackMessage: string): NextResponse {

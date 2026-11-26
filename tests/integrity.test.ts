@@ -317,6 +317,18 @@ describe('Regras de integridade referencial e domínio', () => {
       async listAll() {
         return [];
       },
+      async listFiltered() {
+        return [];
+      },
+      async getMonthlySummaryRaw() {
+        return {
+          totalCents: 0,
+          expenseCount: 0,
+          largestExpense: null,
+          byCategory: [],
+          recentExpenses: [],
+        };
+      },
       async findById(id) {
         return id === EXP_1 ? { id: EXP_1, bankAccountId: ACC_ARCHIVED } : null;
       },

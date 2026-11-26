@@ -1,73 +1,44 @@
 import { DbErrorBanner } from '@/components/db-error-banner';
-import { ExpensesClient, type ExpenseRowItem, type SelectOptionItem } from '@/components/expenses-client';
+import { MonthlySummaryView } from '@/components/monthly-summary-client';
 import { requirePageAuth } from '@/lib/auth/guard';
-import { bankAccountService } from '@/lib/services/bank-accounts';
-import { categoryService } from '@/lib/services/categories';
-import { expenseService } from '@/lib/services/expenses';
-import { personService } from '@/lib/services/people';
+import { getCurrentYearMonth, isValidYearMonth } from '@/lib/domain/dates';
+import { expenseService, type MonthlySummaryResult } from '@/lib/services/expenses';
 
 export const dynamic = 'force-dynamic';
 
-export default async function DespesasPage() {
+interface HomePageProps {
+  searchParams: Promise<{ mes?: string | string[] }>;
+}
+
+export default async function HomePage({ searchParams }: HomePageProps) {
   await requirePageAuth();
 
-  let data: {
-    expenses: ExpenseRowItem[];
-    categories: SelectOptionItem[];
-    people: SelectOptionItem[];
-    bankAccounts: SelectOptionItem[];
-  } | null = null;
+  const resolvedParams = await searchParams;
+  const rawMes = Array.isArray(resolvedParams.mes)
+    ? resolvedParams.mes[0]
+    : resolvedParams.mes;
+  const currentYearMonth = getCurrentYearMonth();
+  const selectedYearMonth =
+    rawMes && isValidYearMonth(rawMes) ? rawMes.trim() : currentYearMonth;
+
+  let summary: MonthlySummaryResult | null = null;
   let errorMessage: string | null = null;
 
   try {
-    const [expenses, categories, people, bankAccounts] = await Promise.all([
-      expenseService.list(),
-      categoryService.list(),
-      personService.list(),
-      bankAccountService.list(),
-    ]);
-
-    data = {
-      expenses: expenses.map((item) => ({
-        id: item.id,
-        description: item.description,
-        amountCents: item.amountCents,
-        date: item.date,
-        categoryId: item.categoryId,
-        categoryName: item.categoryName,
-        personId: item.personId,
-        personName: item.personName,
-        bankAccountId: item.bankAccountId,
-        bankAccountName: item.bankAccountName,
-        bankAccountArchived: item.bankAccountArchived,
-      })),
-      categories: categories.map((c) => ({ id: c.id, name: c.name })),
-      people: people.map((p) => ({
-        id: p.id,
-        name: p.name,
-        isDefault: p.isDefault,
-      })),
-      bankAccounts: bankAccounts.map((a) => ({
-        id: a.id,
-        name: a.name,
-        archived: a.archived,
-      })),
-    };
+    summary = await expenseService.getMonthlySummary(selectedYearMonth, 6);
   } catch (error) {
     errorMessage =
-      error instanceof Error ? error.message : 'Erro ao carregar despesas.';
+      error instanceof Error ? error.message : 'Erro ao carregar resumo mensal.';
   }
 
-  if (!data) {
+  if (!summary) {
     return <DbErrorBanner message={errorMessage ?? undefined} />;
   }
 
   return (
-    <ExpensesClient
-      initialExpenses={data.expenses}
-      categories={data.categories}
-      people={data.people}
-      bankAccounts={data.bankAccounts}
+    <MonthlySummaryView
+      summary={summary}
+      currentYearMonth={currentYearMonth}
     />
   );
 }

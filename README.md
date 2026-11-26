@@ -17,10 +17,12 @@ Aplicação web pessoal em **pt-BR** para organização financeira doméstica, c
 
 ---
 
-## Funcionalidades implementadas (P0)
+## Funcionalidades implementadas (P0 + P1)
 
 - Barreira de acesso por senha compartilhada (`APP_ACCESS_PASSWORD`) com cookie assinado (`HttpOnly`, `SameSite=Lax`/`None` conforme contexto HTTPS, expiração de 7 dias) e limitador de tentativas em memória no servidor.
 - Logout e validação obrigatória de sessão no servidor em páginas protegidas (deduplicada por requisição via React `cache`) e Route Handlers (`/api/*`) com verificação de origem.
+- **Resumo financeiro mensal (`/`)**: navegação entre meses (`< Mês de Ano >`), total do mês, quantidade de lançamentos, média por despesa, maior despesa, gráfico/distribuição por categoria com atalho para o filtro do mês e lista das despesas recentes.
+- **Pesquisa e filtros (`/despesas`)**: pesquisa parcial por descrição (case-insensitive com debounce), filtros combináveis por período (`DD/MM/AAAA`), categoria, responsável e conta bancária, ordenação por data/valor, botão para limpar filtros e total dos resultados filtrados.
 - CRUD de **Categorias**, com bloqueio de exclusão quando houver despesas vinculadas.
 - CRUD de **Pessoas / Responsáveis**, com bloqueio de exclusão quando houver despesas vinculadas e seleção de **responsável padrão** (`is_default`, único no banco via índice único parcial) para pré-seleção automática ao registrar novas despesas.
 - CRUD de **Contas Bancárias**, com instituição opcional, saldo inicial informativo em centavos inteiros e opção de **arquivamento / reativação**.
