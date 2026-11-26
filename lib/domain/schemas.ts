@@ -33,6 +33,12 @@ export const personSchema = z.object({
     .max(60, 'O nome do responsável pode ter no máximo 60 caracteres.'),
 });
 
+export const personDefaultSchema = z.object({
+  isDefault: z.boolean({
+    error: 'Informe se a pessoa deve ser marcada como responsável padrão.',
+  }),
+});
+
 export const bankAccountFormSchema = z.object({
   name: z
     .string()

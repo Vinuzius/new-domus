@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getServerConfigStatus, getSessionSecret } from '@/lib/env';
@@ -10,7 +11,7 @@ export class UnauthorizedError extends Error {
   }
 }
 
-export async function getAuthenticatedSession(): Promise<boolean> {
+export const getAuthenticatedSession = cache(async (): Promise<boolean> => {
   const config = getServerConfigStatus();
   if (!config.isReady) {
     return false;
@@ -24,7 +25,7 @@ export async function getAuthenticatedSession(): Promise<boolean> {
   } catch {
     return false;
   }
-}
+});
 
 export async function requirePageAuth(): Promise<{ ready: boolean }> {
   const config = getServerConfigStatus();

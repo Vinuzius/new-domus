@@ -42,7 +42,11 @@ export default async function DespesasPage() {
         bankAccountArchived: item.bankAccountArchived,
       })),
       categories: categories.map((c) => ({ id: c.id, name: c.name })),
-      people: people.map((p) => ({ id: p.id, name: p.name })),
+      people: people.map((p) => ({
+        id: p.id,
+        name: p.name,
+        isDefault: p.isDefault,
+      })),
       bankAccounts: bankAccounts.map((a) => ({
         id: a.id,
         name: a.name,

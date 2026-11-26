@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { formatCivilDateBR, isValidCivilDate } from '@/lib/domain/dates';
+import {
+  formatCivilDateBR,
+  isValidCivilDate,
+  isValidCivilDateBR,
+  maskCivilDateBRInput,
+  parseCivilDateBRToISO,
+} from '@/lib/domain/dates';
 
-describe('Validação e formatação de datas civis (YYYY-MM-DD)', () => {
-  it('aceita datas civis válidas incluindo ano bissexto', () => {
+describe('Validação, máscara e conversão de datas civis (DD/MM/AAAA e YYYY-MM-DD)', () => {
+  it('aceita datas civis ISO válidas incluindo ano bissexto', () => {
     expect(isValidCivilDate('2026-11-26')).toBe(true);
     expect(isValidCivilDate('2024-02-29')).toBe(true);
     expect(isValidCivilDate('2026-01-01')).toBe(true);
@@ -20,5 +26,43 @@ describe('Validação e formatação de datas civis (YYYY-MM-DD)', () => {
     expect(formatCivilDateBR('2026-01-01')).toBe('01/01/2026');
     expect(formatCivilDateBR('2026-11-26')).toBe('26/11/2026');
     expect(formatCivilDateBR('2026-12-31')).toBe('31/12/2026');
+  });
+
+  it('converte DD/MM/AAAA válido para YYYY-MM-DD sem deslocamento de timezone', () => {
+    expect(parseCivilDateBRToISO('01/01/2026')).toBe('2026-01-01');
+    expect(parseCivilDateBRToISO('26/11/2026')).toBe('2026-11-26');
+    expect(parseCivilDateBRToISO('29/02/2024')).toBe('2024-02-29');
+    expect(parseCivilDateBRToISO(' 31/12/2026 ')).toBe('2026-12-31');
+
+    const iso = parseCivilDateBRToISO('01/03/2026');
+    expect(iso).toBe('2026-03-01');
+    expect(formatCivilDateBR(iso!)).toBe('01/03/2026');
+  });
+
+  it('rejeita datas brasileiras impossíveis, incompletas ou fora do padrão DD/MM/AAAA', () => {
+    expect(parseCivilDateBRToISO('31/02/2026')).toBeNull();
+    expect(parseCivilDateBRToISO('30/02/2026')).toBeNull();
+    expect(parseCivilDateBRToISO('31/04/2026')).toBeNull();
+    expect(parseCivilDateBRToISO('29/02/2025')).toBeNull();
+    expect(parseCivilDateBRToISO('00/01/2026')).toBeNull();
+    expect(parseCivilDateBRToISO('15/13/2026')).toBeNull();
+    expect(parseCivilDateBRToISO('12/05')).toBeNull();
+    expect(parseCivilDateBRToISO('5/3/2026')).toBeNull();
+    expect(parseCivilDateBRToISO('12/05/26')).toBeNull();
+    expect(parseCivilDateBRToISO('2026-05-12')).toBeNull();
+    expect(parseCivilDateBRToISO('')).toBeNull();
+
+    expect(isValidCivilDateBR('31/02/2026')).toBe(false);
+    expect(isValidCivilDateBR('28/02/2026')).toBe(true);
+  });
+
+  it('aplica máscara progressiva DD/MM/AAAA na digitação', () => {
+    expect(maskCivilDateBRInput('')).toBe('');
+    expect(maskCivilDateBRInput('2')).toBe('2');
+    expect(maskCivilDateBRInput('26')).toBe('26');
+    expect(maskCivilDateBRInput('261')).toBe('26/1');
+    expect(maskCivilDateBRInput('2611')).toBe('26/11');
+    expect(maskCivilDateBRInput('26112026')).toBe('26/11/2026');
+    expect(maskCivilDateBRInput('26/11/202699abc')).toBe('26/11/2026');
   });
 });

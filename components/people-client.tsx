@@ -11,6 +11,7 @@ import { Modal } from './modal';
 export interface PersonItem {
   id: string;
   name: string;
+  isDefault: boolean;
   expenseCount: number;
 }
 
@@ -20,6 +21,17 @@ interface PeopleClientProps {
 
 export function PeopleClient({ initialPeople }: PeopleClientProps) {
   const router = useRouter();
+  const [prevInitialPeople, setPrevInitialPeople] = useState(initialPeople);
+  const [optimisticPeople, setOptimisticPeople] = useState<PersonItem[] | null>(null);
+  const [updatingDefaultId, setUpdatingDefaultId] = useState<string | null>(null);
+
+  if (prevInitialPeople !== initialPeople) {
+    setPrevInitialPeople(initialPeople);
+    setOptimisticPeople(null);
+  }
+
+  const people = optimisticPeople ?? initialPeople;
+
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PersonItem | null>(null);
@@ -42,6 +54,49 @@ export function PeopleClient({ initialPeople }: PeopleClientProps) {
     setNameInput(item.name);
     setFormError(null);
     setFormOpen(true);
+  }
+
+  async function handleToggleDefault(person: PersonItem, nextIsDefault: boolean) {
+    if (updatingDefaultId !== null) return;
+
+    const previousSnapshot = people;
+    setUpdatingDefaultId(person.id);
+    setFeedback(null);
+
+    setOptimisticPeople(
+      people.map((item) => {
+        if (nextIsDefault) {
+          return { ...item, isDefault: item.id === person.id };
+        }
+        return item.id === person.id ? { ...item, isDefault: false } : item;
+      })
+    );
+
+    const result = await apiMutate<PersonItem>(
+      `/api/people/${person.id}/default`,
+      'PATCH',
+      { isDefault: nextIsDefault }
+    );
+
+    setUpdatingDefaultId(null);
+
+    if (!result.ok) {
+      if (result.unauthorized) {
+        router.replace('/login');
+        return;
+      }
+      setOptimisticPeople(previousSnapshot);
+      setFeedback({ type: 'error', message: result.error });
+      return;
+    }
+
+    setFeedback({
+      type: 'success',
+      message: nextIsDefault
+        ? `"${person.name}" definido como responsável padrão para novas despesas.`
+        : `"${person.name}" removido como responsável padrão.`,
+    });
+    router.refresh();
   }
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
@@ -109,8 +164,8 @@ export function PeopleClient({ initialPeople }: PeopleClientProps) {
             Pessoas e responsáveis
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            Identifique quem realizou cada despesa da casa. Pessoas com despesas
-            vinculadas não podem ser excluídas.
+            Identifique quem realizou cada despesa da casa e marque opcionalmente um
+            responsável padrão para novos lançamentos.
           </p>
         </div>
 
@@ -126,7 +181,7 @@ export function PeopleClient({ initialPeople }: PeopleClientProps) {
 
       <FeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} />
 
-      {initialPeople.length === 0 ? (
+      {people.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
           <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700">
             <Users className="h-5 w-5" />
@@ -151,48 +206,80 @@ export function PeopleClient({ initialPeople }: PeopleClientProps) {
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-600">
-                <th className="px-5 py-3">Nome</th>
+                <th className="px-5 py-3">Responsável padrão</th>
                 <th className="px-5 py-3">Vínculos</th>
                 <th className="px-5 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {initialPeople.map((person) => (
-                <tr key={person.id} className="transition-colors hover:bg-slate-50/70">
-                  <td className="px-5 py-3.5 font-medium text-slate-900">
-                    {person.name}
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-600 tabular-nums">
-                    {person.expenseCount === 0
-                      ? 'Sem despesas vinculadas'
-                      : `${person.expenseCount} ${
-                          person.expenseCount === 1
-                            ? 'despesa vinculada'
-                            : 'despesas vinculadas'
-                        }`}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(person)}
-                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        <span>Editar</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleting(person)}
-                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:border-red-200 hover:bg-red-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Excluir</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {people.map((person) => {
+                const isRowUpdating = updatingDefaultId === person.id;
+                const checkboxDisabled = updatingDefaultId !== null;
+                const checkboxId = `default-person-${person.id}`;
+
+                return (
+                  <tr key={person.id} className="transition-colors hover:bg-slate-50/70">
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <input
+                          id={checkboxId}
+                          type="checkbox"
+                          checked={person.isDefault}
+                          disabled={checkboxDisabled}
+                          aria-busy={isRowUpdating}
+                          aria-label={`Definir ${person.name} como responsável padrão`}
+                          onChange={(e) =>
+                            handleToggleDefault(person, e.target.checked)
+                          }
+                          className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-wait disabled:opacity-50"
+                        />
+                        <label
+                          htmlFor={checkboxId}
+                          className={`font-medium text-slate-900 select-none ${
+                            checkboxDisabled ? 'cursor-wait' : 'cursor-pointer'
+                          }`}
+                        >
+                          {person.name}
+                        </label>
+                        {person.isDefault ? (
+                          <span className="text-xs font-normal text-slate-500 whitespace-nowrap">
+                            · Padrão
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-slate-600 tabular-nums">
+                      {person.expenseCount === 0
+                        ? 'Sem despesas vinculadas'
+                        : `${person.expenseCount} ${
+                            person.expenseCount === 1
+                              ? 'despesa vinculada'
+                              : 'despesas vinculadas'
+                          }`}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(person)}
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          <span>Editar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleting(person)}
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:border-red-200 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Excluir</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

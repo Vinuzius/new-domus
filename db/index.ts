@@ -49,10 +49,8 @@ export function getDb(): DomusDatabase {
 
   const db = drizzle(client, { schema });
 
-  if (process.env.NODE_ENV !== 'production') {
-    globalThis.__domusPostgresClient = client;
-    globalThis.__domusDrizzleDb = db;
-  }
+  globalThis.__domusPostgresClient = client;
+  globalThis.__domusDrizzleDb = db;
 
   return db;
 }

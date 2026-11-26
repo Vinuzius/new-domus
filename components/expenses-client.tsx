@@ -5,8 +5,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import { apiMutate } from '@/lib/api/client';
-import { formatCivilDateBR, getTodayCivilDate } from '@/lib/domain/dates';
+import {
+  formatCivilDateBR,
+  getTodayCivilDateBR,
+  maskCivilDateBRInput,
+  parseCivilDateBRToISO,
+} from '@/lib/domain/dates';
 import { formatCentsToBRL, formatCentsToInput } from '@/lib/domain/money';
+import { resolveDefaultPersonId } from '@/lib/domain/people';
 import { expenseFormSchema } from '@/lib/domain/schemas';
 import { FeedbackBanner, type FeedbackState } from './feedback-banner';
 import { Modal } from './modal';
@@ -29,6 +35,7 @@ export interface SelectOptionItem {
   id: string;
   name: string;
   archived?: boolean;
+  isDefault?: boolean;
 }
 
 interface ExpensesClientProps {
@@ -68,9 +75,9 @@ export function ExpensesClient({
     setEditing(null);
     setDescription('');
     setAmount('');
-    setDate(getTodayCivilDate());
+    setDate(getTodayCivilDateBR());
     setCategoryId(categories[0]?.id ?? '');
-    setPersonId(people[0]?.id ?? '');
+    setPersonId(resolveDefaultPersonId(people));
     setBankAccountId('');
     setFormError(null);
     setFormOpen(true);
@@ -80,7 +87,7 @@ export function ExpensesClient({
     setEditing(expense);
     setDescription(expense.description);
     setAmount(formatCentsToInput(expense.amountCents));
-    setDate(expense.date);
+    setDate(formatCivilDateBR(expense.date));
     setCategoryId(expense.categoryId);
     setPersonId(expense.personId);
     setBankAccountId(expense.bankAccountId ?? '');
@@ -92,10 +99,16 @@ export function ExpensesClient({
     event.preventDefault();
     setFormError(null);
 
+    const isoDate = parseCivilDateBRToISO(date);
+    if (!isoDate) {
+      setFormError('Informe uma data válida no padrão DD/MM/AAAA.');
+      return;
+    }
+
     const parsed = expenseFormSchema.safeParse({
       description,
       amount,
-      date,
+      date: isoDate,
       categoryId,
       personId,
       bankAccountId: bankAccountId || null,
@@ -110,7 +123,7 @@ export function ExpensesClient({
     const payload = {
       description: description.trim(),
       amount: amount.trim(),
-      date: date.trim(),
+      date: isoDate,
       categoryId,
       personId,
       bankAccountId: bankAccountId || null,
@@ -414,15 +427,19 @@ export function ExpensesClient({
                 htmlFor="expense-date"
                 className="block text-sm font-medium text-slate-800"
               >
-                Data
+                Data (DD/MM/AAAA)
               </label>
               <input
                 id="expense-date"
-                type="date"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={10}
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(e) => setDate(maskCivilDateBRInput(e.target.value))}
+                placeholder="DD/MM/AAAA"
                 disabled={saving}
-                className="mt-1.5 block min-h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 font-mono text-sm text-slate-900 focus:border-slate-900 focus:outline-none disabled:bg-slate-50"
+                className="mt-1.5 block min-h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none disabled:bg-slate-50"
               />
             </div>
           </div>

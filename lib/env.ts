@@ -12,16 +12,26 @@ declare global {
   var __domusEphemeralSessionSecret: string | undefined;
 }
 
+export const MIN_SESSION_SECRET_LENGTH = 32;
+
 export function getServerConfigStatus(): ServerConfigStatus {
   const hasDatabaseUrl = Boolean(process.env.DATABASE_URL?.trim());
   const hasAccessPassword = Boolean(process.env.APP_ACCESS_PASSWORD?.trim());
-  const hasSessionSecret = Boolean(process.env.APP_SESSION_SECRET?.trim());
+  const rawSessionSecret = process.env.APP_SESSION_SECRET?.trim() ?? '';
+  const hasSessionSecret =
+    process.env.NODE_ENV === 'production'
+      ? rawSessionSecret.length >= MIN_SESSION_SECRET_LENGTH
+      : rawSessionSecret.length > 0;
 
   const missingVars: string[] = [];
   if (!hasDatabaseUrl) missingVars.push('DATABASE_URL');
   if (!hasAccessPassword) missingVars.push('APP_ACCESS_PASSWORD');
   if (process.env.NODE_ENV === 'production' && !hasSessionSecret) {
-    missingVars.push('APP_SESSION_SECRET');
+    missingVars.push(
+      rawSessionSecret.length > 0
+        ? `APP_SESSION_SECRET (mínimo ${MIN_SESSION_SECRET_LENGTH} caracteres em produção)`
+        : 'APP_SESSION_SECRET'
+    );
   }
 
   return {
@@ -47,12 +57,17 @@ export function getAccessPassword(): string | null {
 }
 
 export function getSessionSecret(): string {
-  const secret = process.env.APP_SESSION_SECRET?.trim();
-  if (secret && secret.length > 0) {
+  const secret = process.env.APP_SESSION_SECRET?.trim() ?? '';
+  if (process.env.NODE_ENV === 'production') {
+    if (secret.length < MIN_SESSION_SECRET_LENGTH) {
+      throw new Error(
+        `Variável de ambiente APP_SESSION_SECRET deve possuir ao menos ${MIN_SESSION_SECRET_LENGTH} caracteres em produção.`
+      );
+    }
     return secret;
   }
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Variável de ambiente APP_SESSION_SECRET não configurada em produção.');
+  if (secret.length > 0) {
+    return secret;
   }
   if (!globalThis.__domusEphemeralSessionSecret) {
     globalThis.__domusEphemeralSessionSecret = randomBytes(32).toString('hex');

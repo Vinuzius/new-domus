@@ -16,6 +16,7 @@ export default async function PessoasPage() {
     items = people.map((item) => ({
       id: item.id,
       name: item.name,
+      isDefault: item.isDefault,
       expenseCount: item.expenseCount,
     }));
   } catch (error) {

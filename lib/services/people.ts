@@ -1,12 +1,13 @@
 import { asc, count, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { expenses, people } from '@/db/schema';
-import { idSchema, personSchema } from '@/lib/domain/schemas';
+import { idSchema, personDefaultSchema, personSchema } from '@/lib/domain/schemas';
 import { ServiceError, translateDbError } from './errors';
 
 export interface PersonWithUsage {
   id: string;
   name: string;
+  isDefault: boolean;
   expenseCount: number;
   createdAt: Date;
   updatedAt: Date;
@@ -14,11 +15,12 @@ export interface PersonWithUsage {
 
 export interface PersonRepository {
   listWithUsage(): Promise<PersonWithUsage[]>;
-  findById(id: string): Promise<{ id: string; name: string } | null>;
+  findById(id: string): Promise<{ id: string; name: string; isDefault: boolean } | null>;
   findByNameCaseInsensitive(name: string): Promise<{ id: string; name: string } | null>;
   countLinkedExpenses(id: string): Promise<number>;
   insert(name: string): Promise<PersonWithUsage>;
   updateName(id: string, name: string): Promise<PersonWithUsage | null>;
+  setDefault(id: string, isDefault: boolean): Promise<PersonWithUsage | null>;
   deleteById(id: string): Promise<boolean>;
 }
 
@@ -29,6 +31,7 @@ const drizzlePersonRepo: PersonRepository = {
       .select({
         id: people.id,
         name: people.name,
+        isDefault: people.isDefault,
         createdAt: people.createdAt,
         updatedAt: people.updatedAt,
         expenseCount: count(expenses.id),
@@ -47,7 +50,7 @@ const drizzlePersonRepo: PersonRepository = {
   async findById(id) {
     const db = getDb();
     const [row] = await db
-      .select({ id: people.id, name: people.name })
+      .select({ id: people.id, name: people.name, isDefault: people.isDefault })
       .from(people)
       .where(eq(people.id, id))
       .limit(1);
@@ -93,6 +96,49 @@ const drizzlePersonRepo: PersonRepository = {
     if (!updated) return null;
     const expenseCount = await this.countLinkedExpenses(id);
     return { ...updated, expenseCount };
+  },
+
+  async setDefault(id, isDefault) {
+    const db = getDb();
+    return await db.transaction(async (tx) => {
+      const [target] = await tx
+        .select({ id: people.id })
+        .from(people)
+        .where(eq(people.id, id))
+        .limit(1);
+
+      if (!target) {
+        return null;
+      }
+
+      const now = new Date();
+      if (isDefault) {
+        await tx
+          .update(people)
+          .set({ isDefault: false, updatedAt: now })
+          .where(eq(people.isDefault, true));
+      }
+
+      const [updated] = await tx
+        .update(people)
+        .set({ isDefault, updatedAt: now })
+        .where(eq(people.id, id))
+        .returning();
+
+      if (!updated) {
+        return null;
+      }
+
+      const [usage] = await tx
+        .select({ total: count(expenses.id) })
+        .from(expenses)
+        .where(eq(expenses.personId, id));
+
+      return {
+        ...updated,
+        expenseCount: Number(usage?.total ?? 0),
+      };
+    });
   },
 
   async deleteById(id) {
@@ -172,6 +218,36 @@ export function createPersonService(repo: PersonRepository = drizzlePersonRepo) 
       } catch (error) {
         console.error('Erro ao atualizar responsável:', error);
         throw translateDbError(error, 'Não foi possível atualizar o responsável.');
+      }
+    },
+
+    async setDefault(idRaw: string, input: unknown): Promise<PersonWithUsage> {
+      const idParsed = idSchema.safeParse(idRaw);
+      if (!idParsed.success) {
+        throw new ServiceError('VALIDATION', 'Identificador de responsável inválido.', 400);
+      }
+
+      const parsed = personDefaultSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new ServiceError(
+          'VALIDATION',
+          parsed.error.issues[0]?.message ?? 'Dados inválidos para responsável padrão.',
+          400
+        );
+      }
+
+      try {
+        const updated = await repo.setDefault(idParsed.data, parsed.data.isDefault);
+        if (!updated) {
+          throw new ServiceError('NOT_FOUND', 'Responsável não encontrado.', 404);
+        }
+        return updated;
+      } catch (error) {
+        console.error('Erro ao definir responsável padrão:', error);
+        throw translateDbError(
+          error,
+          'Não foi possível atualizar o responsável padrão.'
+        );
       }
     },
 

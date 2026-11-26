@@ -25,8 +25,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          'Configuração do servidor incompleta. Defina DATABASE_URL e APP_ACCESS_PASSWORD.',
+        error: `Configuração do servidor incompleta. Verifique: ${config.missingVars.join(', ')}.`,
       },
       { status: 503 }
     );

@@ -60,6 +60,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={true}
                   className={`relative py-2 text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
                     active
                       ? 'text-slate-900'
