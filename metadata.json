@@ -1,0 +1,6 @@
+{
+  "name": "Domus Finance",
+  "description": "Aplicação web pessoal para organização financeira doméstica com controle de despesas, categorias, responsáveis e contas bancárias.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
