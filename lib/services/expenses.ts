@@ -1,10 +1,15 @@
 import { and, asc, count, desc, eq, gte, ilike, lte, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { bankAccounts, categories, expenses, people } from '@/db/schema';
-import { getMonthDateRange } from '@/lib/domain/dates';
+import {
+  formatCycleRangeLabel,
+  formatYearMonthLabelPTBR,
+  getFinancialCycleRange,
+} from '@/lib/domain/dates';
 import {
   expenseFilterSchema,
   expenseInputSchema,
+  financialSettingsSchema,
   idSchema,
   yearMonthSchema,
   type ExpenseInput,
@@ -68,6 +73,9 @@ export interface MonthlySummaryResult {
   yearMonth: string;
   startDate: string;
   endDate: string;
+  cycleStartDay: number;
+  periodLabel: string;
+  rangeLabel: string;
   totalCents: number;
   expenseCount: number;
   averageCents: number;
@@ -80,7 +88,8 @@ export function buildMonthlySummary(
   yearMonth: string,
   startDate: string,
   endDate: string,
-  raw: MonthlySummaryRawData
+  raw: MonthlySummaryRawData,
+  cycleStartDay = 1
 ): MonthlySummaryResult {
   const totalCents = Math.max(0, Math.trunc(raw.totalCents));
   const expenseCount = Math.max(0, Math.trunc(raw.expenseCount));
@@ -104,10 +113,17 @@ export function buildMonthlySummary(
           : 0,
     }));
 
+  const rangeLabel = formatCycleRangeLabel(startDate, endDate);
+  const periodLabel =
+    cycleStartDay === 1 ? formatYearMonthLabelPTBR(yearMonth) : rangeLabel;
+
   return {
     yearMonth,
     startDate,
     endDate,
+    cycleStartDay,
+    periodLabel,
+    rangeLabel,
     totalCents,
     expenseCount,
     averageCents,
@@ -484,11 +500,12 @@ export function createExpenseService(repo: ExpenseRepository = drizzleExpenseRep
       }
     },
 
-    async getMonthlySummary(
-      yearMonthRaw: string,
+    async getCycleSummary(
+      anchorYearMonthRaw: string,
+      cycleStartDay = 1,
       recentLimit = 6
     ): Promise<MonthlySummaryResult> {
-      const parsed = yearMonthSchema.safeParse(yearMonthRaw);
+      const parsed = yearMonthSchema.safeParse(anchorYearMonthRaw);
       if (!parsed.success) {
         throw new ServiceError(
           'VALIDATION',
@@ -497,16 +514,41 @@ export function createExpenseService(repo: ExpenseRepository = drizzleExpenseRep
         );
       }
 
+      const dayParsed = financialSettingsSchema.safeParse({ cycleStartDay });
+      if (!dayParsed.success) {
+        throw new ServiceError(
+          'VALIDATION',
+          dayParsed.error.issues[0]?.message ?? 'Dia de início do ciclo inválido.',
+          400
+        );
+      }
+
       const safeLimit = Math.max(1, Math.min(20, Math.trunc(recentLimit)));
-      const { startDate, endDate } = getMonthDateRange(parsed.data);
+      const { startDate, endDate } = getFinancialCycleRange(
+        parsed.data,
+        dayParsed.data.cycleStartDay
+      );
 
       try {
         const raw = await repo.getMonthlySummaryRaw(startDate, endDate, safeLimit);
-        return buildMonthlySummary(parsed.data, startDate, endDate, raw);
+        return buildMonthlySummary(
+          parsed.data,
+          startDate,
+          endDate,
+          raw,
+          dayParsed.data.cycleStartDay
+        );
       } catch (error) {
-        console.error('Erro ao calcular resumo mensal:', error);
-        throw translateDbError(error, 'Não foi possível carregar o resumo mensal.');
+        console.error('Erro ao calcular resumo do ciclo financeiro:', error);
+        throw translateDbError(error, 'Não foi possível carregar o resumo financeiro.');
       }
+    },
+
+    async getMonthlySummary(
+      yearMonthRaw: string,
+      recentLimit = 6
+    ): Promise<MonthlySummaryResult> {
+      return this.getCycleSummary(yearMonthRaw, 1, recentLimit);
     },
 
     async create(input: unknown): Promise<{ id: string }> {

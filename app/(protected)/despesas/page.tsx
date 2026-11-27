@@ -6,7 +6,11 @@ import {
   type SelectOptionItem,
 } from '@/components/expenses-client';
 import { requirePageAuth } from '@/lib/auth/guard';
-import { isValidCivilDate } from '@/lib/domain/dates';
+import {
+  getCurrentFinancialCycle,
+  isValidCivilDate,
+  type FinancialCyclePeriod,
+} from '@/lib/domain/dates';
 import {
   EXPENSE_SORT_VALUES,
   idSchema,
@@ -16,6 +20,7 @@ import { bankAccountService } from '@/lib/services/bank-accounts';
 import { categoryService } from '@/lib/services/categories';
 import { expenseService } from '@/lib/services/expenses';
 import { personService } from '@/lib/services/people';
+import { settingsService } from '@/lib/services/settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,24 +82,29 @@ export default async function DespesasPage({ searchParams }: DespesasPageProps) 
     categories: SelectOptionItem[];
     people: SelectOptionItem[];
     bankAccounts: SelectOptionItem[];
+    currentCycle: FinancialCyclePeriod;
   } | null = null;
   let errorMessage: string | null = null;
 
   try {
-    const [filteredResult, categories, people, bankAccounts] = await Promise.all([
-      expenseService.listFiltered({
-        q: initialFilters.q || undefined,
-        startDate: initialFilters.startDate || undefined,
-        endDate: initialFilters.endDate || undefined,
-        categoryId: initialFilters.categoryId || undefined,
-        personId: initialFilters.personId || undefined,
-        bankAccountId: initialFilters.bankAccountId || undefined,
-        sort: initialFilters.sort,
-      }),
-      categoryService.list(),
-      personService.list(),
-      bankAccountService.list(),
-    ]);
+    const [filteredResult, categories, people, bankAccounts, settings] =
+      await Promise.all([
+        expenseService.listFiltered({
+          q: initialFilters.q || undefined,
+          startDate: initialFilters.startDate || undefined,
+          endDate: initialFilters.endDate || undefined,
+          categoryId: initialFilters.categoryId || undefined,
+          personId: initialFilters.personId || undefined,
+          bankAccountId: initialFilters.bankAccountId || undefined,
+          sort: initialFilters.sort,
+        }),
+        categoryService.list(),
+        personService.list(),
+        bankAccountService.list(),
+        settingsService.getFinancialSettings(),
+      ]);
+
+    const currentCycle = getCurrentFinancialCycle(settings.cycleStartDay);
 
     data = {
       expenses: filteredResult.items.map((item) => ({
@@ -122,6 +132,7 @@ export default async function DespesasPage({ searchParams }: DespesasPageProps) 
         name: a.name,
         archived: a.archived,
       })),
+      currentCycle,
     };
   } catch (error) {
     errorMessage =
@@ -137,6 +148,7 @@ export default async function DespesasPage({ searchParams }: DespesasPageProps) 
       initialExpenses={data.expenses}
       initialFilteredTotalCents={data.filteredTotalCents}
       initialFilters={initialFilters}
+      currentCycle={data.currentCycle}
       categories={data.categories}
       people={data.people}
       bankAccounts={data.bankAccounts}

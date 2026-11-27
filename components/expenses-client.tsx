@@ -3,17 +3,28 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pencil, Plus, ReceiptText, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import {
+  CalendarClock,
+  Pencil,
+  Plus,
+  ReceiptText,
+  RotateCcw,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { apiMutate } from '@/lib/api/client';
 import {
   formatCivilDateBR,
   getTodayCivilDateBR,
   maskCivilDateBRInput,
   parseCivilDateBRToISO,
+  type FinancialCyclePeriod,
 } from '@/lib/domain/dates';
 import { formatCentsToBRL, formatCentsToInput } from '@/lib/domain/money';
 import { resolveDefaultPersonId } from '@/lib/domain/people';
 import { expenseFormSchema, type ExpenseSortOption } from '@/lib/domain/schemas';
+import { DatePickerInput } from './date-picker-input';
 import { FeedbackBanner, type FeedbackState } from './feedback-banner';
 import { Modal } from './modal';
 
@@ -52,6 +63,7 @@ interface ExpensesClientProps {
   initialExpenses: ExpenseRowItem[];
   initialFilteredTotalCents: number;
   initialFilters: ExpenseFilterState;
+  currentCycle: FinancialCyclePeriod;
   categories: SelectOptionItem[];
   people: SelectOptionItem[];
   bankAccounts: SelectOptionItem[];
@@ -76,6 +88,7 @@ export function ExpensesClient({
   initialExpenses,
   initialFilteredTotalCents,
   initialFilters,
+  currentCycle,
   categories,
   people,
   bankAccounts,
@@ -93,12 +106,6 @@ export function ExpensesClient({
 
   const [filters, setFilters] = useState<ExpenseFilterState>(initialFilters);
   const [searchInput, setSearchInput] = useState(initialFilters.q);
-  const [startDateInput, setStartDateInput] = useState(
-    initialFilters.startDate ? formatCivilDateBR(initialFilters.startDate) : ''
-  );
-  const [endDateInput, setEndDateInput] = useState(
-    initialFilters.endDate ? formatCivilDateBR(initialFilters.endDate) : ''
-  );
   const [filterDateError, setFilterDateError] = useState<string | null>(null);
   const [loadingList, setLoadingList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -141,9 +148,12 @@ export function ExpensesClient({
       filters.bankAccountId ||
       filters.sort !== 'date_desc' ||
       searchInput.trim() ||
-      startDateInput ||
-      endDateInput
+      filterDateError
   );
+
+  const isUsingCurrentCycle =
+    filters.startDate === currentCycle.startDate &&
+    filters.endDate === currentCycle.endDate;
 
   async function executeFetch(nextFilters: ExpenseFilterState, syncUrl = true) {
     if (abortRef.current) {
@@ -218,79 +228,14 @@ export function ExpensesClient({
     }, 280);
   }
 
-  function handleStartDateChange(raw: string) {
-    const masked = maskCivilDateBRInput(raw);
-    setStartDateInput(masked);
-
-    if (masked.length === 0) {
-      setFilterDateError(null);
-      if (filters.startDate !== '') {
-        applyImmediateFilter({ ...filters, startDate: '' });
-      }
-      return;
-    }
-
-    if (masked.length < 10) {
-      setFilterDateError(null);
-      return;
-    }
-
-    const iso = parseCivilDateBRToISO(masked);
-    if (!iso) {
-      setFilterDateError('Data inicial inválida. Use o formato DD/MM/AAAA.');
-      return;
-    }
-
-    if (filters.endDate && iso > filters.endDate) {
-      setFilterDateError('A data inicial não pode ser posterior à data final.');
-      return;
-    }
-
+  function handleApplyCurrentCycle() {
     setFilterDateError(null);
-    applyImmediateFilter({ ...filters, startDate: iso });
-  }
-
-  function handleEndDateChange(raw: string) {
-    const masked = maskCivilDateBRInput(raw);
-    setEndDateInput(masked);
-
-    if (masked.length === 0) {
-      setFilterDateError(null);
-      if (filters.endDate !== '') {
-        applyImmediateFilter({ ...filters, endDate: '' });
-      }
-      return;
-    }
-
-    if (masked.length < 10) {
-      setFilterDateError(null);
-      return;
-    }
-
-    const iso = parseCivilDateBRToISO(masked);
-    if (!iso) {
-      setFilterDateError('Data final inválida. Use o formato DD/MM/AAAA.');
-      return;
-    }
-
-    if (filters.startDate && iso < filters.startDate) {
-      setFilterDateError('A data final não pode ser anterior à data inicial.');
-      return;
-    }
-
-    setFilterDateError(null);
-    applyImmediateFilter({ ...filters, endDate: iso });
-  }
-
-  function handleDateFilterBlur(field: 'start' | 'end') {
-    const currentValue = field === 'start' ? startDateInput : endDateInput;
-    if (currentValue.length > 0 && currentValue.length < 10) {
-      setFilterDateError(
-        field === 'start'
-          ? 'Data inicial incompleta. Informe DD/MM/AAAA ou limpe o campo.'
-          : 'Data final incompleta. Informe DD/MM/AAAA ou limpe o campo.'
-      );
-    }
+    setListError(null);
+    applyImmediateFilter({
+      ...filters,
+      startDate: currentCycle.startDate,
+      endDate: currentCycle.endDate,
+    });
   }
 
   function handleClearFilters() {
@@ -298,8 +243,6 @@ export function ExpensesClient({
       clearTimeout(debounceRef.current);
     }
     setSearchInput('');
-    setStartDateInput('');
-    setEndDateInput('');
     setFilterDateError(null);
     setListError(null);
     applyImmediateFilter({
@@ -534,47 +477,29 @@ export function ExpensesClient({
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div>
-              <label
-                htmlFor="filter-start-date"
-                className="block text-xs font-medium text-slate-600"
-              >
-                Data inicial
-              </label>
-              <input
-                id="filter-start-date"
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={10}
-                value={startDateInput}
-                onChange={(e) => handleStartDateChange(e.target.value)}
-                onBlur={() => handleDateFilterBlur('start')}
-                placeholder="DD/MM/AAAA"
-                className="mt-1 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none"
-              />
-            </div>
+            <DatePickerInput
+              id="filter-start-date"
+              label="Data inicial"
+              value={filters.startDate}
+              maxDate={filters.endDate || undefined}
+              onInvalidInput={setFilterDateError}
+              onChange={(iso) => {
+                setFilterDateError(null);
+                applyImmediateFilter({ ...filters, startDate: iso });
+              }}
+            />
 
-            <div>
-              <label
-                htmlFor="filter-end-date"
-                className="block text-xs font-medium text-slate-600"
-              >
-                Data final
-              </label>
-              <input
-                id="filter-end-date"
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={10}
-                value={endDateInput}
-                onChange={(e) => handleEndDateChange(e.target.value)}
-                onBlur={() => handleDateFilterBlur('end')}
-                placeholder="DD/MM/AAAA"
-                className="mt-1 block min-h-[40px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none"
-              />
-            </div>
+            <DatePickerInput
+              id="filter-end-date"
+              label="Data final"
+              value={filters.endDate}
+              minDate={filters.startDate || undefined}
+              onInvalidInput={setFilterDateError}
+              onChange={(iso) => {
+                setFilterDateError(null);
+                applyImmediateFilter({ ...filters, endDate: iso });
+              }}
+            />
 
             <div>
               <label
@@ -679,16 +604,40 @@ export function ExpensesClient({
               </span>
             </div>
 
-            {hasActiveFilters ? (
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={handleClearFilters}
-                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap"
+                onClick={handleApplyCurrentCycle}
+                aria-pressed={isUsingCurrentCycle}
+                title={`Preencher período com o ciclo financeiro atual (${currentCycle.rangeLabel})`}
+                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+                  isUsingCurrentCycle
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                }`}
               >
-                <RotateCcw className="h-3.5 w-3.5" />
-                <span>Limpar filtros</span>
+                <CalendarClock className="h-3.5 w-3.5" />
+                <span>Usar ciclo atual</span>
+                <span
+                  className={`hidden sm:inline font-mono tabular-nums ${
+                    isUsingCurrentCycle ? 'text-slate-200' : 'text-slate-500'
+                  }`}
+                >
+                  ({currentCycle.rangeLabel})
+                </span>
               </button>
-            ) : null}
+
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Limpar filtros</span>
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       </section>

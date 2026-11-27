@@ -251,8 +251,17 @@ export const expenseFilterSchema = z
     }
   );
 
+export const financialSettingsSchema = z.object({
+  cycleStartDay: z
+    .number({ error: 'Informe um dia de início entre 1 e 28.' })
+    .int('O dia de início do ciclo deve ser um número inteiro.')
+    .min(1, 'O dia de início do ciclo deve ser no mínimo 1.')
+    .max(28, 'O dia de início do ciclo deve ser no máximo 28.'),
+});
+
 export type CategoryInput = z.infer<typeof categorySchema>;
 export type PersonInput = z.infer<typeof personSchema>;
 export type BankAccountInput = z.infer<typeof bankAccountInputSchema>;
 export type ExpenseInput = z.infer<typeof expenseInputSchema>;
 export type ExpenseFilterInput = z.infer<typeof expenseFilterSchema>;
+export type FinancialSettingsInput = z.infer<typeof financialSettingsSchema>;

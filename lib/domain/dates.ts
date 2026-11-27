@@ -175,3 +175,170 @@ export function formatYearMonthLabelPTBR(yearMonth: string): string {
   const monthName = MONTH_NAMES_PTBR[monthIndex] ?? monthStr;
   return `${monthName} de ${yearStr}`;
 }
+
+/**
+ * Converte data civil YYYY-MM-DD para Date local (00:00:00 local) sem deslocamento UTC.
+ */
+export function civilDateToLocalDate(isoDate: string): Date | null {
+  if (!isValidCivilDate(isoDate)) {
+    return null;
+  }
+  const [yearStr, monthStr, dayStr] = isoDate.trim().split('-');
+  const year = Number.parseInt(yearStr, 10);
+  const month = Number.parseInt(monthStr, 10);
+  const day = Number.parseInt(dayStr, 10);
+  return new Date(year, month - 1, day);
+}
+
+/**
+ * Converte Date local selecionada no calendário para YYYY-MM-DD sem usar toISOString (UTC).
+ */
+export function localDateToCivilDate(date: Date): string | null {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return null;
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const candidate = `${year}-${month}-${day}`;
+  return isValidCivilDate(candidate) ? candidate : null;
+}
+
+export function validateCivilDateRange(
+  startDate?: string,
+  endDate?: string
+): { valid: boolean; error?: string } {
+  const start = startDate?.trim() || '';
+  const end = endDate?.trim() || '';
+
+  if (start && !isValidCivilDate(start)) {
+    return { valid: false, error: 'Data inicial inválida.' };
+  }
+  if (end && !isValidCivilDate(end)) {
+    return { valid: false, error: 'Data final inválida.' };
+  }
+  if (start && end && start > end) {
+    return {
+      valid: false,
+      error: 'A data inicial não pode ser posterior à data final.',
+    };
+  }
+  return { valid: true };
+}
+
+export const MIN_CYCLE_START_DAY = 1;
+export const MAX_CYCLE_START_DAY = 28;
+
+export function isValidCycleStartDay(day: number): boolean {
+  return (
+    Number.isInteger(day) &&
+    day >= MIN_CYCLE_START_DAY &&
+    day <= MAX_CYCLE_START_DAY
+  );
+}
+
+export interface FinancialCyclePeriod {
+  anchorYearMonth: string;
+  startDate: string;
+  endDate: string;
+  cycleStartDay: number;
+  label: string;
+  rangeLabel: string;
+}
+
+export function formatCycleRangeLabel(startDate: string, endDate: string): string {
+  return `${formatCivilDateBR(startDate)} — ${formatCivilDateBR(endDate)}`;
+}
+
+/**
+ * Determina o mês-âncora (YYYY-MM) do ciclo financeiro ao qual uma data civil pertence.
+ */
+export function getCycleAnchorFromDate(
+  referenceDate: string,
+  cycleStartDay: number
+): string {
+  if (!isValidCivilDate(referenceDate)) {
+    throw new Error(`Data de referência inválida: ${referenceDate}`);
+  }
+  if (!isValidCycleStartDay(cycleStartDay)) {
+    throw new Error(`Dia de início do ciclo inválido: ${cycleStartDay}`);
+  }
+
+  const [yearStr, monthStr, dayStr] = referenceDate.trim().split('-');
+  const yearMonth = `${yearStr}-${monthStr}`;
+  const day = Number.parseInt(dayStr, 10);
+
+  if (cycleStartDay === 1 || day >= cycleStartDay) {
+    return yearMonth;
+  }
+
+  return shiftYearMonth(yearMonth, -1);
+}
+
+/**
+ * Calcula as datas inclusivas [startDate, endDate] de um ciclo a partir do mês-âncora (YYYY-MM)
+ * e do dia de início configurado (1..28).
+ */
+export function getFinancialCycleRange(
+  anchorYearMonth: string,
+  cycleStartDay: number
+): FinancialCyclePeriod {
+  if (!isValidYearMonth(anchorYearMonth)) {
+    throw new Error(`Competência de ciclo inválida: ${anchorYearMonth}`);
+  }
+  if (!isValidCycleStartDay(cycleStartDay)) {
+    throw new Error(`Dia de início do ciclo inválido: ${cycleStartDay}`);
+  }
+
+  const normalizedAnchor = anchorYearMonth.trim();
+
+  if (cycleStartDay === 1) {
+    const { startDate, endDate } = getMonthDateRange(normalizedAnchor);
+    return {
+      anchorYearMonth: normalizedAnchor,
+      startDate,
+      endDate,
+      cycleStartDay: 1,
+      label: formatYearMonthLabelPTBR(normalizedAnchor),
+      rangeLabel: formatCycleRangeLabel(startDate, endDate),
+    };
+  }
+
+  const startDate = `${normalizedAnchor}-${String(cycleStartDay).padStart(2, '0')}`;
+  const nextMonth = shiftYearMonth(normalizedAnchor, 1);
+  const endDate = `${nextMonth}-${String(cycleStartDay - 1).padStart(2, '0')}`;
+  const rangeLabel = formatCycleRangeLabel(startDate, endDate);
+
+  return {
+    anchorYearMonth: normalizedAnchor,
+    startDate,
+    endDate,
+    cycleStartDay,
+    label: rangeLabel,
+    rangeLabel,
+  };
+}
+
+export function getFinancialCycleForDate(
+  referenceDate: string,
+  cycleStartDay: number
+): FinancialCyclePeriod {
+  const anchor = getCycleAnchorFromDate(referenceDate, cycleStartDay);
+  return getFinancialCycleRange(anchor, cycleStartDay);
+}
+
+export function getCurrentFinancialCycle(
+  cycleStartDay: number,
+  referenceDate: string = getTodayCivilDate()
+): FinancialCyclePeriod {
+  return getFinancialCycleForDate(referenceDate, cycleStartDay);
+}
+
+export function shiftFinancialCycle(
+  anchorYearMonth: string,
+  deltaCycles: number,
+  cycleStartDay: number
+): FinancialCyclePeriod {
+  const nextAnchor = shiftYearMonth(anchorYearMonth, deltaCycles);
+  return getFinancialCycleRange(nextAnchor, cycleStartDay);
+}

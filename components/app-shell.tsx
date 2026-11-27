@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/categorias', label: 'Categorias' },
   { href: '/pessoas', label: 'Pessoas' },
   { href: '/contas', label: 'Contas' },
+  { href: '/configuracoes', label: 'Configurações' },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {

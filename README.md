@@ -21,12 +21,21 @@ Aplicação web pessoal em **pt-BR** para organização financeira doméstica, c
 
 - Barreira de acesso por senha compartilhada (`APP_ACCESS_PASSWORD`) com cookie assinado (`HttpOnly`, `SameSite=Lax`/`None` conforme contexto HTTPS, expiração de 7 dias) e limitador de tentativas em memória no servidor.
 - Logout e validação obrigatória de sessão no servidor em páginas protegidas (deduplicada por requisição via React `cache`) e Route Handlers (`/api/*`) com verificação de origem.
-- **Resumo financeiro mensal (`/`)**: navegação entre meses (`< Mês de Ano >`), total do mês, quantidade de lançamentos, média por despesa, maior despesa, gráfico/distribuição por categoria com atalho para o filtro do mês e lista das despesas recentes.
-- **Pesquisa e filtros (`/despesas`)**: pesquisa parcial por descrição (case-insensitive com debounce), filtros combináveis por período (`DD/MM/AAAA`), categoria, responsável e conta bancária, ordenação por data/valor, botão para limpar filtros e total dos resultados filtrados.
+- **Resumo financeiro por ciclo (`/`):** navegação entre ciclos (`< 04/11/2026 — 03/12/2026 >` ou `< Novembro de 2026 >` quando dia = 1), atalho **Ciclo atual**, total do período, quantidade de lançamentos, média por despesa, maior despesa, distribuição por categoria clicável e lista das despesas recentes.
+- **Configuração de ciclo financeiro (`/configuracoes`):** seleção do **Dia de início do ciclo** (1 a 28) persistido no PostgreSQL, permitindo alinhar os períodos ao fechamento do cartão de crédito ou manter meses completos do calendário (padrão: dia `1`).
+- **Pesquisa e filtros (`/despesas`):** pesquisa parcial por descrição (case-insensitive com debounce), seletores de **Data inicial** e **Data final** com calendário em português (`DD/MM/AAAA`), botão **Usar ciclo atual**, filtros combináveis por categoria, responsável e conta bancária, ordenação por data/valor, limpeza de filtros e total dos resultados filtrados.
 - CRUD de **Categorias**, com bloqueio de exclusão quando houver despesas vinculadas.
 - CRUD de **Pessoas / Responsáveis**, com bloqueio de exclusão quando houver despesas vinculadas e seleção de **responsável padrão** (`is_default`, único no banco via índice único parcial) para pré-seleção automática ao registrar novas despesas.
 - CRUD de **Contas Bancárias**, com instituição opcional, saldo inicial informativo em centavos inteiros e opção de **arquivamento / reativação**.
-- CRUD de **Despesas**, exigindo categoria e responsável, permitindo conta bancária opcional, gravando valores em centavos inteiros (`BRL`) e utilizando entrada digitada no padrão brasileiro **`DD/MM/AAAA`** convertida com validação real de calendário para `DATE` (`YYYY-MM-DD`) sem deslocamento de fuso horário.
+- CRUD de **Despesas**, exigindo categoria e responsável, permitindo conta bancária opcional, gravando valores em centavos inteiros (`BRL`) e utilizando entrada no padrão brasileiro **`DD/MM/AAAA`** convertida com validação real de calendário para `DATE` (`YYYY-MM-DD`) sem deslocamento de fuso horário.
+
+---
+
+## Ciclo financeiro e formato de datas
+
+- **Dia padrão `1`:** quando `cycle_start_day` é `1` (padrão inicial), cada ciclo corresponde exatamente ao mês do calendário (do dia `01` ao último dia do mês, respeitando anos bissextos).
+- **Dia personalizado (`2` a `28`):** quando configurado para outro dia (por exemplo, `4`), cada ciclo vai de `04/MM` até `03/(MM+1)` com **data inicial e data final inclusivas** (ex.: `04/11/2026 — 03/12/2026`). A data original das despesas não é alterada; apenas o agrupamento do resumo e o atalho dos filtros utilizam o intervalo do ciclo.
+- **Formato das datas:** a interface exibe e recebe `DD/MM/AAAA` (nos seletores com calendário em `pt-BR` e nos formulários); os estados internos, parâmetros de URL/API e o PostgreSQL (`DATE`) operam com datas civis `YYYY-MM-DD` sem conversão UTC que altere o dia.
 
 ---
 
@@ -58,7 +67,7 @@ Copie `.env.example` para `.env.local` (não versione segredos):
 
 3. **Aplicar migrações no PostgreSQL:**
 
-   As migrações versionadas ficam em `drizzle/`. Para aplicá-las no banco configurado em `DATABASE_URL` (incluindo novas colunas e índices incrementais sem perda de dados):
+   As migrações versionadas ficam em `drizzle/` (incluindo `0002_salty_gunslinger.sql`, que cria `financial_settings` com valor padrão `1`). Para aplicá-las no banco configurado em `DATABASE_URL` sem perda de dados:
 
    ```bash
    pnpm db:migrate

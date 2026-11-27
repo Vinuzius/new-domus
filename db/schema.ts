@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -99,7 +100,24 @@ export const expensesRelations = relations(expenses, ({ one }) => ({
   }),
 }));
 
+export const financialSettings = pgTable(
+  'financial_settings',
+  {
+    id: integer('id').primaryKey().default(1),
+    cycleStartDay: integer('cycle_start_day').notNull().default(1),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check('financial_settings_singleton_id_check', sql`${table.id} = 1`),
+    check(
+      'financial_settings_cycle_start_day_check',
+      sql`${table.cycleStartDay} >= 1 AND ${table.cycleStartDay} <= 28`
+    ),
+  ]
+);
+
 export type CategoryRow = typeof categories.$inferSelect;
 export type PersonRow = typeof people.$inferSelect;
 export type BankAccountRow = typeof bankAccounts.$inferSelect;
 export type ExpenseRow = typeof expenses.$inferSelect;
+export type FinancialSettingsRow = typeof financialSettings.$inferSelect;
