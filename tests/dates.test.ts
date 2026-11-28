@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  APP_TIME_ZONE,
   civilDateToLocalDate,
   formatCivilDateBR,
   formatYearMonthLabelPTBR,
   getCurrentFinancialCycle,
+  getCurrentYearMonth,
   getFinancialCycleForDate,
   getFinancialCycleRange,
   getMonthDateRange,
+  getTodayCivilDate,
+  getTodayCivilDateBR,
   isValidCivilDate,
   isValidCivilDateBR,
   isValidYearMonth,
@@ -192,5 +196,46 @@ describe('Cálculo de ciclos financeiros personalizados', () => {
     expect(next.anchorYearMonth).toBe('2027-01');
     expect(next.startDate).toBe('2027-01-04');
     expect(next.endDate).toBe('2027-02-03');
+  });
+});
+
+describe('Data atual e ciclo no fuso fixo America/Sao_Paulo', () => {
+  it('mantém o fuso fixo America/Sao_Paulo na constante de configuração', () => {
+    expect(APP_TIME_ZONE).toBe('America/Sao_Paulo');
+  });
+
+  it('considera a noite de Brasília antes da meia-noite quando em UTC já é o dia seguinte', () => {
+    const lateNightBR = new Date('2026-11-28T01:30:00Z');
+    expect(getTodayCivilDate(lateNightBR)).toBe('2026-11-27');
+    expect(getTodayCivilDateBR(lateNightBR)).toBe('27/11/2026');
+    expect(getCurrentYearMonth(lateNightBR)).toBe('2026-11');
+  });
+
+  it('vira o dia exatamente às 00:00 de Brasília (03:00Z)', () => {
+    const midnightBR = new Date('2026-11-28T03:00:00Z');
+    expect(getTodayCivilDate(midnightBR)).toBe('2026-11-28');
+    expect(getTodayCivilDateBR(midnightBR)).toBe('28/11/2026');
+    expect(getCurrentYearMonth(midnightBR)).toBe('2026-11');
+  });
+
+  it('trata corretamente a virada de ano em UTC enquanto ainda é 31/12 em Brasília', () => {
+    const newYearEveBR = new Date('2027-01-01T02:00:00Z');
+    expect(getTodayCivilDate(newYearEveBR)).toBe('2026-12-31');
+    expect(getTodayCivilDateBR(newYearEveBR)).toBe('31/12/2026');
+    expect(getCurrentYearMonth(newYearEveBR)).toBe('2026-12');
+  });
+
+  it('mantém o ciclo de novembro (04/11 a 03/12) em 2026-12-04T02:00:00Z (ainda dia 03 em Brasília)', () => {
+    const cycleBoundaryInstant = new Date('2026-12-04T02:00:00Z');
+    const cycle = getCurrentFinancialCycle(
+      4,
+      getTodayCivilDate(cycleBoundaryInstant)
+    );
+    expect(cycle).toMatchObject({
+      anchorYearMonth: '2026-11',
+      startDate: '2026-11-04',
+      endDate: '2026-12-03',
+    });
+    expect(getCurrentFinancialCycle(4, cycleBoundaryInstant)).toEqual(cycle);
   });
 });

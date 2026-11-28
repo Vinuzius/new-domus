@@ -1,10 +1,10 @@
-# Domus Finance (v0)
+# Domus Finance
 
 Aplicação web pessoal em **pt-BR** para organização financeira doméstica, com persistência centralizada em **PostgreSQL (Supabase)** via **Drizzle ORM** e acesso protegido por senha compartilhada.
 
 ---
 
-## Stack da v0
+## Stack
 
 - **Frontend e Backend:** Next.js (App Router), React e TypeScript
 - **Estilização:** Tailwind CSS v4
@@ -36,6 +36,7 @@ Aplicação web pessoal em **pt-BR** para organização financeira doméstica, c
 - **Dia padrão `1`:** quando `cycle_start_day` é `1` (padrão inicial), cada ciclo corresponde exatamente ao mês do calendário (do dia `01` ao último dia do mês, respeitando anos bissextos).
 - **Dia personalizado (`2` a `28`):** quando configurado para outro dia (por exemplo, `4`), cada ciclo vai de `04/MM` até `03/(MM+1)` com **data inicial e data final inclusivas** (ex.: `04/11/2026 — 03/12/2026`). A data original das despesas não é alterada; apenas o agrupamento do resumo e o atalho dos filtros utilizam o intervalo do ciclo.
 - **Formato das datas:** a interface exibe e recebe `DD/MM/AAAA` (nos seletores com calendário em `pt-BR` e nos formulários); os estados internos, parâmetros de URL/API e o PostgreSQL (`DATE`) operam com datas civis `YYYY-MM-DD` sem conversão UTC que altere o dia.
+- **Fuso horário de referência:** o cálculo da data civil atual ("hoje", ciclo atual e data padrão de novas despesas) utiliza o fuso fixo `America/Sao_Paulo`, garantindo consistência entre o navegador e servidores rodando em UTC.
 
 ---
 

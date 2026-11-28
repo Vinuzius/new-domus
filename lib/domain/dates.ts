@@ -2,6 +2,15 @@ const CIVIL_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 const BR_CIVIL_DATE_REGEX = /^(\d{2})\/(\d{2})\/(\d{4})$/;
 const YEAR_MONTH_REGEX = /^(\d{4})-(\d{2})$/;
 
+export const APP_TIME_ZONE = 'America/Sao_Paulo';
+
+const appTimeZoneDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: APP_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
 const MONTH_NAMES_PTBR = [
   'Janeiro',
   'Fevereiro',
@@ -91,16 +100,21 @@ export function formatCivilDateBR(isoDate: string): string {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
-export function getTodayCivilDate(): string {
-  const now = new Date();
-  const year = String(now.getFullYear());
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
+export function getTodayCivilDate(now: Date = new Date()): string {
+  const formatted = appTimeZoneDateFormatter.format(now);
+  if (CIVIL_DATE_REGEX.test(formatted)) {
+    return formatted;
+  }
+
+  const parts = appTimeZoneDateFormatter.formatToParts(now);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
   return `${year}-${month}-${day}`;
 }
 
-export function getTodayCivilDateBR(): string {
-  return formatCivilDateBR(getTodayCivilDate());
+export function getTodayCivilDateBR(now: Date = new Date()): string {
+  return formatCivilDateBR(getTodayCivilDate(now));
 }
 
 export function isValidYearMonth(value: string): boolean {
@@ -116,11 +130,8 @@ export function isValidYearMonth(value: string): boolean {
   return year >= 1900 && year <= 2100 && month >= 1 && month <= 12;
 }
 
-export function getCurrentYearMonth(): string {
-  const now = new Date();
-  const year = String(now.getFullYear());
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
+export function getCurrentYearMonth(now: Date = new Date()): string {
+  return getTodayCivilDate(now).slice(0, 7);
 }
 
 /**
@@ -329,9 +340,13 @@ export function getFinancialCycleForDate(
 
 export function getCurrentFinancialCycle(
   cycleStartDay: number,
-  referenceDate: string = getTodayCivilDate()
+  referenceDate: string | Date = getTodayCivilDate()
 ): FinancialCyclePeriod {
-  return getFinancialCycleForDate(referenceDate, cycleStartDay);
+  const resolvedDate =
+    referenceDate instanceof Date
+      ? getTodayCivilDate(referenceDate)
+      : referenceDate;
+  return getFinancialCycleForDate(resolvedDate, cycleStartDay);
 }
 
 export function shiftFinancialCycle(

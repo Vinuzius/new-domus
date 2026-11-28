@@ -8,6 +8,7 @@ import { Calendar, X } from 'lucide-react';
 import {
   civilDateToLocalDate,
   formatCivilDateBR,
+  getTodayCivilDate,
   localDateToCivilDate,
   maskCivilDateBRInput,
   parseCivilDateBRToISO,
@@ -48,8 +49,9 @@ export function DatePickerInput({
   );
 
   const selectedDate = value ? civilDateToLocalDate(value) : null;
+  const appTodayLocalDate = civilDateToLocalDate(getTodayCivilDate());
   const [visibleMonth, setVisibleMonth] = useState<Date>(
-    () => selectedDate ?? new Date()
+    () => selectedDate ?? appTodayLocalDate ?? new Date()
   );
 
   if (prevPropValue !== value) {
@@ -263,6 +265,7 @@ export function DatePickerInput({
             month={visibleMonth}
             onMonthChange={setVisibleMonth}
             selected={selectedDate ?? undefined}
+            today={appTodayLocalDate ?? undefined}
             onSelect={handleSelectDay}
             disabled={disabledMatchers.length > 0 ? disabledMatchers : undefined}
             classNames={{
@@ -291,7 +294,8 @@ export function DatePickerInput({
             <button
               type="button"
               onClick={() => {
-                const today = new Date();
+                const today =
+                  civilDateToLocalDate(getTodayCivilDate()) ?? new Date();
                 handleSelectDay(today);
               }}
               className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900"
